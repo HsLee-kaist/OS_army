@@ -28,6 +28,12 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+//by Hyun_1st
+/*List for sleeping processes*/
+static struct list sleep_list;
+
+static int64_t minimum_tick;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -108,6 +114,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -115,6 +122,8 @@ thread_init (void) {
 	init_thread (initial_thread, "main", PRI_DEFAULT);
 	initial_thread->status = THREAD_RUNNING;
 	initial_thread->tid = allocate_tid ();
+	// printf("init\n");
+	thread_print_stats();
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -131,6 +140,7 @@ thread_start (void) {
 
 	/* Wait for the idle thread to initialize idle_thread. */
 	sema_down (&idle_started);
+	
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -183,7 +193,6 @@ thread_create (const char *name, int priority,
 	tid_t tid;
 
 	ASSERT (function != NULL);
-
 	/* Allocate thread. */
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
@@ -206,6 +215,7 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	thread_unblock (t);
+	
 
 	return tid;
 }
@@ -263,6 +273,8 @@ thread_current (void) {
 	   have overflowed its stack.  Each thread has less than 4 kB
 	   of stack, so a few big automatic arrays or moderate
 	   recursion can cause stack overflow. */
+	// printf("%d:current\n", t->tid);
+	// printf("%s",t->status);
 	ASSERT (is_thread (t));
 	ASSERT (t->status == THREAD_RUNNING);
 
@@ -306,6 +318,63 @@ thread_yield (void) {
 		list_push_back (&ready_list, &curr->elem);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
+}
+
+
+/* push the thread to sleep list and reschedule*/
+void
+thread_sleep(int64_t ticks) {
+	struct thread *curr = thread_current();
+	enum intr_level old_level;
+
+	ASSERT (!intr_context());
+	old_level = intr_disable();
+	
+	if(curr != idle_thread){
+		curr->local_tick = ticks;
+
+		update_minimum_tick(curr, ticks);
+		list_push_back (&sleep_list, &curr->elem);
+		thread_block();
+	}
+	intr_set_level(old_level);
+}
+
+void
+thread_wake(int64_t ticks){
+	struct list_elem *sleep_thread;
+	sleep_thread = list_begin(&sleep_list);
+
+	while(sleep_thread != list_end (&sleep_list)){
+			struct thread *th = list_entry(sleep_thread, struct thread, elem);
+			if(ticks >= th->local_tick) {
+				sleep_thread = list_remove(&th->elem);
+				thread_unblock(th);
+			}
+			else {
+				update_minimum_tick(th, ticks);
+				sleep_thread = list_next (sleep_thread);
+			}
+		}
+}
+
+void update_minimum_tick(struct thread *th, int64_t ticks){
+	int64_t cur_tick = th->local_tick;
+	if(cur_tick < minimum_tick){
+		minimum_tick = cur_tick;
+	}
+	// if (cur_tick < minimum_tick || minimum_tick <= ticks) // 두번째 조건문은 list 첫 thread의 tick이 ticks보다 클 때 적용
+	// 	minimum_tick = cur_tick;
+	// else {													/* 업데이트 된 후 global_tick보다 작은 tick이 나타났을때 */
+	// 	if (cur_tick <= ticks) {
+	// 		th = list_remove(&th->elem);
+	// 		thread_unblock(th);
+	// 	}
+	// }
+}
+
+int64_t get_minimum_tick(){
+	return minimum_tick;
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
